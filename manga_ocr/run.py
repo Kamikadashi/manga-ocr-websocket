@@ -1,6 +1,8 @@
 import sys
 import time
 from pathlib import Path
+import asyncio
+import websockets
 
 import fire
 import numpy as np
@@ -11,7 +13,6 @@ from loguru import logger
 
 from manga_ocr import MangaOcr
 
-
 def are_images_identical(img1, img2):
     if None in (img1, img2):
         return img1 == img2
@@ -21,61 +22,48 @@ def are_images_identical(img1, img2):
 
     return (img1.shape == img2.shape) and (img1 == img2).all()
 
+connected = set()
 
-def process_and_write_results(mocr, img_or_path, write_to):
+async def send_to_websocket(message):
+    if connected:  # if there are any connected clients
+        await asyncio.wait([ws.send(message) for ws in connected])
+
+async def process_and_write_results(mocr, img_or_path, write_to):
     t0 = time.time()
-    text = mocr(img_or_path)
+    blob_string = mocr(img_or_path)  # assuming mocr returns a string containing a bytes object
     t1 = time.time()
+
+    # Convert the string to bytes and then decode to a string
+    text = bytes(blob_string, 'utf-8').decode('utf-8')
 
     logger.info(f'Text recognized in {t1 - t0:0.03f} s: {text}')
 
     if write_to == 'clipboard':
         pyperclip.copy(text)
-    else:
-        write_to = Path(write_to)
-        if write_to.suffix != '.txt':
-            raise ValueError('write_to must be either "clipboard" or a path to a text file')
-
-        with write_to.open('a', encoding="utf-8") as f:
+    elif write_to.endswith('.txt'):
+        with open(write_to, 'a', encoding="utf-8") as f:
             f.write(text + '\n')
-
+    elif write_to == 'websocket':
+        await send_to_websocket(text)
+    else:
+        raise ValueError('write_to must be either "clipboard", "websocket" or a path to a text file')
 
 def get_path_key(path):
     return path, path.lstat().st_mtime
 
-
-def run(read_from='clipboard',
-        write_to='clipboard',
-        pretrained_model_name_or_path='kha-white/manga-ocr-base',
-        force_cpu=False,
+async def run(mocr,
+        read_from='clipboard',
+        write_to='websocket',
         delay_secs=0.1,
         verbose=False
         ):
     """
     Run OCR in the background, waiting for new images to appear either in system clipboard, or a directory.
-    Recognized texts can be either saved to system clipboard, or appended to a text file.
+    Recognized texts can be sent to a WebSocket server.
 
     :param read_from: Specifies where to read input images from. Can be either "clipboard", or a path to a directory.
-    :param write_to: Specifies where to save recognized texts to. Can be either "clipboard", or a path to a text file.
-    :param pretrained_model_name_or_path: Path to a trained model, either local or from Transformers' model hub.
-    :param force_cpu: If True, OCR will use CPU even if GPU is available.
-    :param verbose: If True, unhides all warnings.
     :param delay_secs: How often to check for new images, in seconds.
     """
-
-    mocr = MangaOcr(pretrained_model_name_or_path, force_cpu)
-
-    if sys.platform not in ('darwin', 'win32') and write_to == 'clipboard':
-        # Check if the system is using Wayland
-        import os
-        if os.environ.get('WAYLAND_DISPLAY'):
-            # Check if the wl-clipboard package is installed
-            if os.system("which wl-copy > /dev/null") == 0:
-                pyperclip.set_clipboard("wl-clipboard")
-            else:
-                msg = 'Your session uses wayland and does not have wl-clipboard installed. ' \
-                    'Install wl-clipboard for write in clipboard to work.'
-                raise NotImplementedError(msg)
 
     if read_from == 'clipboard':
         from PIL import ImageGrab
@@ -98,9 +86,9 @@ def run(read_from='clipboard',
                     logger.warning('Error while reading from clipboard ({})'.format(error))
             else:
                 if isinstance(img, Image.Image) and not are_images_identical(img, old_img):
-                    process_and_write_results(mocr, img, write_to)
+                    await process_and_write_results(mocr, img, write_to)
 
-            time.sleep(delay_secs)
+            await asyncio.sleep(delay_secs)
 
     else:
         read_from = Path(read_from)
@@ -125,10 +113,28 @@ def run(read_from='clipboard',
                     except (UnidentifiedImageError, OSError) as e:
                         logger.warning(f'Error while reading file {path}: {e}')
                     else:
-                        process_and_write_results(mocr, img, write_to)
+                        await process_and_write_results(mocr, img, write_to)
 
-            time.sleep(delay_secs)
+            await asyncio.sleep(delay_secs)
 
+async def server(websocket, path):
+    # Register.
+    connected.add(websocket)
+    try:
+        # Implement logic here.
+        await websocket.wait_closed()
+    finally:
+        # Unregister.
+        connected.remove(websocket)
 
 if __name__ == '__main__':
-    fire.Fire(run)
+    pretrained_model_name_or_path='kha-white/manga-ocr-base'
+    force_cpu=False
+    mocr = MangaOcr(pretrained_model_name_or_path, force_cpu)
+
+    start_server = websockets.serve(server, "127.0.0.1", 6699)
+
+    loop = asyncio.get_event_loop()
+    loop.run_until_complete(start_server)
+    loop.create_task(run(mocr))
+    loop.run_forever()
