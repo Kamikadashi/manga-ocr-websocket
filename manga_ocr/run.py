@@ -58,10 +58,14 @@ async def run(mocr,
         verbose=False
         ):
     """
-    Run OCR in the background, waiting for new images to appear either in system clipboard, or a directory.
-    Recognized texts can be sent to a WebSocket server.
+    Run OCR in the background, waiting for new images to appear either in system clipboard, a directory.
+    Recognized texts can be either saved to system clipboard, appended to a text file or sent to a WebSocket server.
 
     :param read_from: Specifies where to read input images from. Can be either "clipboard", or a path to a directory.
+    :param write_to: Specifies where to save recognized texts to. Can be either "clipboard", a path to a text file, or "websocket".
+    :param pretrained_model_name_or_path: Path to a trained model, either local or from Transformers' model hub.
+    :param force_cpu: If True, OCR will use CPU even if GPU is available.
+    :param verbose: If True, unhides all warnings.
     :param delay_secs: How often to check for new images, in seconds.
     """
 
