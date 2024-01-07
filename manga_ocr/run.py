@@ -58,7 +58,7 @@ async def run(mocr,
         verbose=False
         ):
     """
-    Run OCR in the background, waiting for new images to appear either in system clipboard, or a directory.
+    Run OCR in the background, waiting for new images to appear either in system clipboard, a directory.
     Recognized texts can be either saved to system clipboard, appended to a text file or sent to a WebSocket server.
 
     :param read_from: Specifies where to read input images from. Can be either "clipboard", or a path to a directory.
@@ -135,6 +135,19 @@ if __name__ == '__main__':
     pretrained_model_name_or_path='kha-white/manga-ocr-base'
     force_cpu=False
     mocr = MangaOcr(pretrained_model_name_or_path, force_cpu)
+
+    # Check if the system is not macOS or Windows and write_to is set to 'clipboard'
+    if sys.platform not in ('darwin', 'win32') and write_to == 'clipboard':
+        # Check if the system is using Wayland
+        import os
+        if os.environ.get('WAYLAND_DISPLAY'):
+            # Check if the wl-clipboard package is installed
+            if os.system("which wl-copy > /dev/null") == 0:
+                pyperclip.set_clipboard("wl-clipboard")
+            else:
+                msg = 'Your session uses wayland and does not have wl-clipboard installed. ' \
+                      'Install wl-clipboard for write in clipboard to work.'
+                raise NotImplementedError(msg)
 
     start_server = websockets.serve(server, "127.0.0.1", 6699)
 
