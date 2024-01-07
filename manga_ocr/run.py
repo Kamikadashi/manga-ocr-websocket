@@ -58,7 +58,7 @@ async def run(mocr,
         verbose=False
         ):
     """
-    Run OCR in the background, waiting for new images to appear either in system clipboard, a directory.
+    Run OCR in the background, waiting for new images to appear either in system clipboard, or a directory.
     Recognized texts can be either saved to system clipboard, appended to a text file or sent to a WebSocket server.
 
     :param read_from: Specifies where to read input images from. Can be either "clipboard", or a path to a directory.
